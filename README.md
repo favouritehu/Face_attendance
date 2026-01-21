@@ -48,3 +48,15 @@ Click **Deploy**. The build process might take a few minutes as it compiles `dli
 - **Build Failures:** Ensure the Dockerfile includes `cmake` and `build-essential` (already included).
 - **Camera Not Working:** Ensure you are accessing via `https://` config in Coolify.
 - **"Connecting..." indefinitely:** Ensure the port `8501` is exposed and mapped correctly.
+
+### ❓ Connection Issues? (STUN/TURN)
+If the camera says **"Connection is taking longer than expected..."**, your network (or the server's network) is blocking the P2P connection.
+
+**Solution: Add a TURN Server** (Free options available like [Metered.ca](https://www.metered.ca/tools/openrelay/)).
+
+1.  Get TURN credentials (URL, Username, Password).
+2.  In Coolify -> Service -> **Environment Variables**:
+    *   `TURN_URL`: `turn:standard.turn.provider.com:3478`
+    *   `TURN_USERNAME`: `your_user`
+    *   `TURN_PASSWORD`: `your_password`
+3.  Redeploy. The app will automatically use these to bypass firewalls.

@@ -261,13 +261,29 @@ if st.session_state.page == "Monitor":
     col1, col2 = st.columns([0.1, 0.8]) # Center the video
     with col2:
         st.markdown('<div class="video-card">', unsafe_allow_html=True)
-        # ROBUST CONNECTION SETTINGS (Fixes connection delay)
-        rtc_config = RTCConfiguration({
-            "iceServers": [
-                {"urls": ["stun:stun.l.google.com:19302"]},
-                {"urls": ["stun:global.stun.twilio.com:3478"]}
-            ]
-        })
+        # ROBUST CONNECTION SETTINGS
+        # 1. Default Public STUN Servers (Free, Google/Twilio/Mozilla)
+        ice_servers = [
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {"urls": ["stun:stun2.l.google.com:19302"]},
+            {"urls": ["stun:global.stun.twilio.com:3478"]},
+        ]
+
+        # 2. Add TURN Server if configured in Environment Variables (Crucial for Cloud/Corporate Networks)
+        # Usage: Set TURN_URL, TURN_USERNAME, TURN_PASSWORD in Coolify/Docker Env
+        turn_url = os.environ.get("TURN_URL")
+        turn_user = os.environ.get("TURN_USERNAME")
+        turn_pass = os.environ.get("TURN_PASSWORD")
+
+        if turn_url and turn_user and turn_pass:
+            ice_servers.append({
+                "urls": [turn_url],
+                "username": turn_user,
+                "credential": turn_pass
+            })
+
+        rtc_config = RTCConfiguration({"iceServers": ice_servers})
         
         webrtc_streamer(
             key="factory_monitor",
