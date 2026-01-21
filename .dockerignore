@@ -1,0 +1,20 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv
+venv/
+env/
+
+# Mac
+.DS_Store
+
+# Persistence (Don't copy local data to image, mount it instead)
+known_faces/
+factory_logs.csv
