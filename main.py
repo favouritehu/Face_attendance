@@ -173,17 +173,19 @@ class FactoryEngine(VideoProcessorBase):
         
         # Optimize: Run AI every 5th frame
         if self.frame_skip % 5 == 0:
-            # Resize to 0.5x (720p -> 360p) for speed
-            small = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+            # SUPER OPTIMIZATION: 0.25x scale (Extreme speedup)
+            # Processing 360x240 image instead of 720p
+            small = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
             rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
             
-            # Upsample 2x to see faces from far away
-            locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=2)
+            # Upsample 1x is usually enough for 0.25x if faces are close
+            # We explicitly use "hog" (Histogram of Oriented Gradients) which is faster than CNN
+            locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=1, model="hog")
             encs = face_recognition.face_encodings(rgb, locs)
             
             new_results = []
             for enc, loc in zip(encs, locs):
-                matches = face_recognition.compare_faces(self.encodings, enc, tolerance=0.42)
+                matches = face_recognition.compare_faces(self.encodings, enc, tolerance=0.5) # Looser tolerance for low-res
                 name = "Unknown"
                 color = (200, 200, 200) # Grey default
                 status = ""
@@ -201,12 +203,15 @@ class FactoryEngine(VideoProcessorBase):
                         status = "LOGGED"
                         color = (0, 200, 0)
 
-                new_results.append((name, color, loc, status))
+                # Scale back up by 4x (since we scaled down by 0.25x)
+                top, right, bottom, left = loc
+                new_results.append((name, color, (top*4, right*4, bottom*4, left*4), status))
             self.last_results = new_results
 
         # Draw HUD
-        for name, color, loc, status in self.last_results:
-            top, right, bottom, left = [v * 2 for v in loc]
+        for name, color, (top, right, bottom, left), status in self.last_results:
+            # Coordinates are already scaled up
+            pass 
             
             # 1. Clean Corner Brackets (Not covering face)
             l = 30
