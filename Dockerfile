@@ -27,7 +27,7 @@ COPY . .
 
 # Create necessary directories for persistence if they don't exist
 RUN mkdir -p /app/known_faces && \
-    touch /app/factory_logs.csv
+    mkdir -p /app/logs
 
 # Expose Streamlit port
 EXPOSE 8501

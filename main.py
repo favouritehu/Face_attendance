@@ -14,14 +14,17 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 st.set_page_config(page_title="FactoryGuard AI", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
 # --- CONSTANTS & SETTINGS ---
+# --- CONSTANTS & SETTINGS ---
 FACES_DIR = 'known_faces'
-ATTENDANCE_FILE = 'factory_logs.csv'
+LOGS_DIR = 'logs'
+ATTENDANCE_FILE = os.path.join(LOGS_DIR, 'factory_logs.csv')
 REQUIRED_SAMPLES = 10   # Number of photos needed to register
 MIN_SHIFT_MINUTES = 60  # How long a shift lasts before they can check out (prevents mistakes)
 RESCAN_COOLDOWN = 2     # How many minutes to wait before scanning the same person again
 
 # --- DIRECTORY SETUP ---
 os.makedirs(FACES_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
 if not os.path.exists(ATTENDANCE_FILE):
     pd.DataFrame(columns=['Name', 'Time', 'Date', 'Type']).to_csv(ATTENDANCE_FILE, index=False)
 

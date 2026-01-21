@@ -25,18 +25,15 @@ You **MUST** configure these volumes to ensure user data and logs survive redepl
 | Volume Name / Host Path | Container Path       | Description              |
 |-------------------------|----------------------|--------------------------|
 | `known_faces`           | `/app/known_faces`   | Stores registered faces  |
-| `factory_logs`          | `/app/factory_logs.csv` | Stores attendance logs |
+| `logs`                  | `/app/logs`          | Stores attendance logs   |
 
 1. Go to **Storage**.
 2. Click **Add Storage**.
-3. Add `/app/known_faces`.
-4. Add `/app/factory_logs.csv`. Note: For a single file, it's often safer to mount the *directory* or rely on the app to recreate the file if the mount is a directory. **Recommendation:** Since Coolify volumes differ, if you can only mount directories, you may need to adjust to mount a data folder. However, for file bind mounts:
-   - If using **local path** (bind mount): `path/to/host/logs.csv` -> `/app/factory_logs.csv`
-   - If using **Docker volumes**: Just mount a `data` volume to `/app` (be careful not to overwrite code) or mount specific folders.
-   - **EASIEST**: Mount a volume to `/app/known_faces` and another to `/app/logs` (if you change code to save logs there).
-   - **CURRENT CONFIG**: The app saves to root. 
-     - **Option A (Simpler):** Add a volume for `/app/known_faces`. Logs might be ephemeral if not mounted carefully.
-     - **Option B (Robust):** Mount `/app/known_faces`. For logs, accept they might be reset or try to mount the file if Coolify supports it.
+3. Add VOLUME for `/app/known_faces`.
+4. Add VOLUME for `/app/logs`. 
+
+**Why directory mounts?**
+Mounting directories (e.g., `/app/logs`) is safer than single files in Docker/Coolify. The app will automatically create `factory_logs.csv` inside the `logs` folder.
 
 ### 3. Deploy
 Click **Deploy**. The build process might take a few minutes as it compiles `dlib`.
