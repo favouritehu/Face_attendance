@@ -161,87 +161,98 @@ def smart_log_logic(name):
         return "ERROR", (100, 100, 100)
 
 # --- 4. VIDEO PROCESSING ENGINE ---
+import threading
+import queue
+
+# --- 4. VIDEO PROCESSING ENGINE (Multi-Threaded) ---
 class FactoryEngine(VideoProcessorBase):
     def __init__(self):
         self.encodings, self.names = load_database()
-        self.frame_skip = 0
+        self.frame_queue = queue.Queue(maxsize=1)
+        self.result_queue = queue.Queue(maxsize=1)
         self.last_results = []
-        self.prev_gray = None
-        self.empty_frames_count = 0
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        self.frame_skip += 1
+        self.daemon = True
+        self.lock = threading.Lock()
         
-        # Optimize: Run AI every 5th frame
-        if self.frame_skip % 5 == 0:
-            # SUPER OPTIMIZATION: 0.25x scale (Extreme speedup)
+        # Start AI Worker Thread
+        threading.Thread(target=self.ai_worker, daemon=True).start()
+
+    def ai_worker(self):
+        """Runs face recognition in a separate background thread"""
+        prev_gray = None
+        
+        while True:
+            try:
+                # Get latest frame (blocking wait)
+                img = self.frame_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            # 1. OPTIMIZATION: Resize to 0.25x
             small = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
             
-            # --- MOTION DETECTION (Idle Mode) ---
+            # 2. MOTION DETECTION
             gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
             gray = cv2.GaussianBlur(gray, (21, 21), 0)
             
             should_scan = True
-            
-            if self.prev_gray is not None:
-                # Calculate difference between frames
-                delta = cv2.absdiff(self.prev_gray, gray)
+            if prev_gray is not None:
+                delta = cv2.absdiff(prev_gray, gray)
                 thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
                 motion_area = cv2.countNonZero(thresh)
-                
-                # If very little motion AND no faces currently tracked -> SKIP AI
-                if motion_area < 500 and not self.last_results:
+                if motion_area < 500 and not self.last_results: # Use cached results for check
                     should_scan = False
-                    self.empty_frames_count += 1
-                else:
-                    self.empty_frames_count = 0
-            
-            self.prev_gray = gray
-            
-            if not should_scan:
-                # Just return frame, don't run heavy face_recognition
-                # Draw "IDLE" status if debug needed, or just nothing
-                pass
-            else:
+            prev_gray = gray
+
+            if should_scan:
                 rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-                
-                # Upsample 1x is usually enough for 0.25x if faces are close
-                # We explicitly use "hog" (Histogram of Oriented Gradients) which is faster than CNN
+                # HOG Model + 1x Upsample (Fastest CPU config)
                 locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=1, model="hog")
                 encs = face_recognition.face_encodings(rgb, locs)
-            
-            new_results = []
-            for enc, loc in zip(encs, locs):
-                matches = face_recognition.compare_faces(self.encodings, enc, tolerance=0.5) # Looser tolerance for low-res
-                name = "Unknown"
-                color = (200, 200, 200) # Grey default
-                status = ""
                 
-                if True in matches:
-                    idx = matches.index(True)
-                    name = self.names[idx]
-                    res = smart_log_logic(name)
-                    if res and res[0]:
-                        status, rgb_color = res
-                        # Convert RGB tuple to BGR for OpenCV
-                        color = (rgb_color[2], rgb_color[1], rgb_color[0])
-                    else:
-                        # Cooldown active, show logged status
-                        status = "LOGGED"
-                        color = (0, 200, 0)
+                results = []
+                for enc, loc in zip(encs, locs):
+                    matches = face_recognition.compare_faces(self.encodings, enc, tolerance=0.5)
+                    name = "Unknown"
+                    color = (200, 200, 200)
+                    status = ""
+                    
+                    if True in matches:
+                        idx = matches.index(True)
+                        name = self.names[idx]
+                        res = smart_log_logic(name)
+                        if res and res[0]:
+                            status, rgb_color = res
+                            color = (rgb_color[2], rgb_color[1], rgb_color[0])
+                        else:
+                            status = "LOGGED"
+                            color = (0, 200, 0)
+                    
+                    # Scale coords back up (x4)
+                    top, right, bottom, left = loc
+                    results.append((name, color, (top*4, right*4, bottom*4, left*4), status))
+                
+                # Update latest results safely
+                if not self.result_queue.full():
+                    self.result_queue.put(results)
 
-                # Scale back up by 4x (since we scaled down by 0.25x)
-                top, right, bottom, left = loc
-                new_results.append((name, color, (top*4, right*4, bottom*4, left*4), status))
-            self.last_results = new_results
-
-        # Draw HUD
-        for name, color, (top, right, bottom, left), status in self.last_results:
-            # Coordinates are already scaled up
-            pass 
+    def recv(self, frame):
+        """Main Video Loop - Must run at 30 FPS"""
+        img = frame.to_ndarray(format="bgr24")
+        
+        # 1. Send frame to AI thread (Non-blocking drop if busy)
+        if not self.frame_queue.full():
+            self.frame_queue.put(img)
             
-            # 1. Clean Corner Brackets (Not covering face)
+        # 2. Check for new results
+        try:
+            self.last_results = self.result_queue.get_nowait()
+        except queue.Empty:
+            pass # Keep using old results until new ones arrive
+
+        # 3. Draw HUD (Instantly, using last known positions)
+        for name, color, (top, right, bottom, left), status in self.last_results:
+            # Clean Brackets
             l = 30
             t = 4
             cv2.line(img, (left, top), (left+l, top), color, t)
@@ -254,17 +265,13 @@ class FactoryEngine(VideoProcessorBase):
             cv2.line(img, (right, bottom), (right-l, bottom), color, t)
             cv2.line(img, (right, bottom), (right, bottom-l), color, t)
             
-            # 2. Text Label BELOW the face (Unobtrusive)
-            # Create a nice background pill
+            # Label
             cv2.rectangle(img, (left, bottom + 15), (right, bottom + 50), color, -1)
-            
-            # Centered Name
             font_scale = 0.7
             text_size = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)[0]
             text_x = left + (right - left - text_size[0]) // 2
             cv2.putText(img, name, (text_x, bottom + 40), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 2)
             
-            # 3. Status Tag (Floating Above)
             if status:
                 cv2.rectangle(img, (left, top - 35), (right, top - 5), (0,0,0), -1)
                 cv2.putText(img, status, (left + 5, top - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
