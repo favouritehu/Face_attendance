@@ -171,8 +171,8 @@ class FactoryEngine(VideoProcessorBase):
         img = frame.to_ndarray(format="bgr24")
         self.frame_skip += 1
         
-        # Optimize: Run AI every 2nd frame
-        if self.frame_skip % 2 == 0:
+        # Optimize: Run AI every 5th frame
+        if self.frame_skip % 5 == 0:
             # Resize to 0.5x (720p -> 360p) for speed
             small = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
             rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
@@ -289,7 +289,7 @@ if st.session_state.page == "Monitor":
             key="factory_monitor",
             video_processor_factory=FactoryEngine,
             rtc_configuration=rtc_config,
-            media_stream_constraints={"video": {"width": 1280, "height": 720}, "audio": False},
+            media_stream_constraints={"video": {"width": 854, "height": 480}, "audio": False},
             async_processing=True
         )
         st.markdown('</div>', unsafe_allow_html=True)
