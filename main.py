@@ -166,6 +166,8 @@ class FactoryEngine(VideoProcessorBase):
         self.encodings, self.names = load_database()
         self.frame_skip = 0
         self.last_results = []
+        self.prev_gray = None
+        self.empty_frames_count = 0
 
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
@@ -174,14 +176,40 @@ class FactoryEngine(VideoProcessorBase):
         # Optimize: Run AI every 5th frame
         if self.frame_skip % 5 == 0:
             # SUPER OPTIMIZATION: 0.25x scale (Extreme speedup)
-            # Processing 360x240 image instead of 720p
             small = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
-            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
             
-            # Upsample 1x is usually enough for 0.25x if faces are close
-            # We explicitly use "hog" (Histogram of Oriented Gradients) which is faster than CNN
-            locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=1, model="hog")
-            encs = face_recognition.face_encodings(rgb, locs)
+            # --- MOTION DETECTION (Idle Mode) ---
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            
+            should_scan = True
+            
+            if self.prev_gray is not None:
+                # Calculate difference between frames
+                delta = cv2.absdiff(self.prev_gray, gray)
+                thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
+                motion_area = cv2.countNonZero(thresh)
+                
+                # If very little motion AND no faces currently tracked -> SKIP AI
+                if motion_area < 500 and not self.last_results:
+                    should_scan = False
+                    self.empty_frames_count += 1
+                else:
+                    self.empty_frames_count = 0
+            
+            self.prev_gray = gray
+            
+            if not should_scan:
+                # Just return frame, don't run heavy face_recognition
+                # Draw "IDLE" status if debug needed, or just nothing
+                pass
+            else:
+                rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                
+                # Upsample 1x is usually enough for 0.25x if faces are close
+                # We explicitly use "hog" (Histogram of Oriented Gradients) which is faster than CNN
+                locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=1, model="hog")
+                encs = face_recognition.face_encodings(rgb, locs)
             
             new_results = []
             for enc, loc in zip(encs, locs):
