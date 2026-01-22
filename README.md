@@ -52,13 +52,16 @@ Click **Deploy**. The build process might take a few minutes as it compiles `dli
 ### ❓ Connection Issues? (STUN/TURN)
 If the camera says **"Connection is taking longer than expected..."**, your network (or the server's network) is blocking the P2P connection.
 
-**Solution: Add a TURN Server (MANDATORY for most Cloud setups)**
-1.  **Get Free TURN Credentials**: Go to [Metered.ca OpenRelay](https://www.metered.ca/tools/openrelay/) and click "Create a Free Account" (or just copy the credentials if provided).
-2.  **In Coolify -> Service -> Environment Variables**, add:
-    *   `TURN_URL`: `turn:global.turn.metered.ca:80?transport=tcp`  (Example)
-    *   `TURN_USERNAME`: `your_metered_username`
-    *   `TURN_PASSWORD`: `your_metered_password`
-3.  **Redeploy**: This is CRITICAL. The app needs to restart to pick up the new variables.
+**Solution: Add a TURN Server (Easiest Way - Metered.ca)**
+
+1.  **Get your API URL**: You already have it! It looks like:
+    `https://camerafavouritefab.metered.live/api/v1/turn/credentials?apiKey=YOUR_API_KEY`
+2.  **In Coolify -> Service -> Environment Variables**, add one simple variable:
+    *   `ICE_SERVERS_URL`: `https://camerafavouritefab.metered.live/api/v1/turn/credentials?apiKey=f43166290d8713f4fce8b3ad0dc68e8de0e2`
+    *(Replace with your full URL if different)*.
+3.  **Redeploy**.
+
+The app will now automatically fetch the fresh TURN credentials from that URL every time it starts. This is much more reliable than hardcoding passwords.
 
 **Why is this needed?**
 WebRTC tries to connect Peer-to-Peer. Corporate firewalls, Cloudflare Tunnels, and Docker containers often block this. A TURN server relays the traffic around the blockage.

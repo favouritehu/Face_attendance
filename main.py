@@ -7,6 +7,7 @@ import os
 import shutil
 import time
 import av
+import requests
 from datetime import datetime
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 
@@ -307,16 +308,31 @@ if st.session_state.page == "Monitor":
     with col2:
         st.markdown('<div class="video-card">', unsafe_allow_html=True)
         # ROBUST CONNECTION SETTINGS
-        # 1. Default Public STUN Servers (Free, Google/Twilio/Mozilla)
+        # 1. Default Public STUN Servers
         ice_servers = [
             {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
             {"urls": ["stun:global.stun.twilio.com:3478"]},
         ]
 
-        # 2. Add TURN Server if configured in Environment Variables (Crucial for Cloud/Corporate Networks)
-        # Usage: Set TURN_URL, TURN_USERNAME, TURN_PASSWORD in Coolify/Docker Env
+        # 2. Dynamic TURN Configuration (Metered.ca or similar)
+        # Usage: Set ICE_SERVERS_URL in Coolify/Docker Env with the full API URL
+        ice_servers_url = os.environ.get("ICE_SERVERS_URL")
+        
+        if ice_servers_url:
+            try:
+                # Fetch credentials dynamically
+                r = requests.get(ice_servers_url)
+                if r.status_code == 200:
+                    dynamic_servers = r.json()
+                    # Metered returns a list of servers directly, or sometimes an object
+                    # We assume it returns a list compatible with RTCConfiguration
+                    if isinstance(dynamic_servers, list):
+                        ice_servers.extend(dynamic_servers)
+                    print(f"Loaded {len(dynamic_servers)} ICE servers from API")
+            except Exception as e:
+                print(f"Failed to fetch ICE servers: {e}")
+
+        # 3. Manual TURN Configuration (Fallback)
         turn_url = os.environ.get("TURN_URL")
         turn_user = os.environ.get("TURN_USERNAME")
         turn_pass = os.environ.get("TURN_PASSWORD")
