@@ -52,11 +52,13 @@ Click **Deploy**. The build process might take a few minutes as it compiles `dli
 ### ❓ Connection Issues? (STUN/TURN)
 If the camera says **"Connection is taking longer than expected..."**, your network (or the server's network) is blocking the P2P connection.
 
-**Solution: Add a TURN Server** (Free options available like [Metered.ca](https://www.metered.ca/tools/openrelay/)).
+**Solution: Add a TURN Server (MANDATORY for most Cloud setups)**
+1.  **Get Free TURN Credentials**: Go to [Metered.ca OpenRelay](https://www.metered.ca/tools/openrelay/) and click "Create a Free Account" (or just copy the credentials if provided).
+2.  **In Coolify -> Service -> Environment Variables**, add:
+    *   `TURN_URL`: `turn:global.turn.metered.ca:80?transport=tcp`  (Example)
+    *   `TURN_USERNAME`: `your_metered_username`
+    *   `TURN_PASSWORD`: `your_metered_password`
+3.  **Redeploy**: This is CRITICAL. The app needs to restart to pick up the new variables.
 
-1.  Get TURN credentials (URL, Username, Password).
-2.  In Coolify -> Service -> **Environment Variables**:
-    *   `TURN_URL`: `turn:standard.turn.provider.com:3478`
-    *   `TURN_USERNAME`: `your_user`
-    *   `TURN_PASSWORD`: `your_password`
-3.  Redeploy. The app will automatically use these to bypass firewalls.
+**Why is this needed?**
+WebRTC tries to connect Peer-to-Peer. Corporate firewalls, Cloudflare Tunnels, and Docker containers often block this. A TURN server relays the traffic around the blockage.
