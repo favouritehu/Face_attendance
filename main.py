@@ -180,8 +180,6 @@ class FactoryEngine(VideoProcessorBase):
 
     def ai_worker(self):
         """Runs face recognition in a separate background thread"""
-        prev_gray = None
-        
         while True:
             try:
                 try:
@@ -190,55 +188,45 @@ class FactoryEngine(VideoProcessorBase):
                 except queue.Empty:
                     continue
 
-                # 1. OPTIMIZATION: Resize to 0.25x
-                small = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
+                # 1. Balanced Optimization: 0.5x scale (Good quality/speed tradeoff)
+                # 0.25x was too pixelated, causing missed detections
+                small = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
                 
-                # 2. MOTION DETECTION
-                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-                gray = cv2.GaussianBlur(gray, (21, 21), 0)
+                # Convert to RGB
+                rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
                 
-                should_scan = True
-                if prev_gray is not None:
-                    delta = cv2.absdiff(prev_gray, gray)
-                    thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
-                    motion_area = cv2.countNonZero(thresh)
-                    if motion_area < 500 and not self.last_results: # Use cached results for check
-                        should_scan = False
-                prev_gray = gray
+                # 2. Recognition - Always run (Removed Motion Detection Skip to fix freezing)
+                # HOG Model + 1x Upsample is fast enough on modern CPUs with 0.5x image
+                locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=1, model="hog")
+                encs = face_recognition.face_encodings(rgb, locs)
+                
+                results = []
+                for enc, loc in zip(encs, locs):
+                    matches = face_recognition.compare_faces(self.encodings, enc, tolerance=0.5)
+                    name = "Unknown"
+                    color = (200, 200, 200)
+                    status = ""
+                    
+                    if True in matches:
+                        idx = matches.index(True)
+                        name = self.names[idx]
+                        res = smart_log_logic(name)
+                        if res and res[0]:
+                            status, rgb_color = res
+                            color = (rgb_color[2], rgb_color[1], rgb_color[0])
+                        else:
+                            status = "LOGGED"
+                            color = (0, 200, 0)
+                    
+                    # Scale coords back up (x2 because we used 0.5x)
+                    top, right, bottom, left = loc
+                    results.append((name, color, (top*2, right*2, bottom*2, left*2), status))
+                
+                # Update latest results safely
+                if not self.result_queue.full():
+                    self.result_queue.put(results)
 
-                if should_scan:
-                    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-                    # HOG Model + 1x Upsample (Fastest CPU config)
-                    locs = face_recognition.face_locations(rgb, number_of_times_to_upsample=1, model="hog")
-                    encs = face_recognition.face_encodings(rgb, locs)
-                    
-                    results = []
-                    for enc, loc in zip(encs, locs):
-                        matches = face_recognition.compare_faces(self.encodings, enc, tolerance=0.5)
-                        name = "Unknown"
-                        color = (200, 200, 200)
-                        status = ""
-                        
-                        if True in matches:
-                            idx = matches.index(True)
-                            name = self.names[idx]
-                            res = smart_log_logic(name)
-                            if res and res[0]:
-                                status, rgb_color = res
-                                color = (rgb_color[2], rgb_color[1], rgb_color[0])
-                            else:
-                                status = "LOGGED"
-                                color = (0, 200, 0)
-                        
-                        # Scale coords back up (x4)
-                        top, right, bottom, left = loc
-                        results.append((name, color, (top*4, right*4, bottom*4, left*4), status))
-                    
-                    # Update latest results safely
-                    if not self.result_queue.full():
-                        self.result_queue.put(results)
             except Exception as e:
-                # Catch ANY error (e.g., face_recognition failure) and keep thread alive
                 print(f"AI Thread Error: {e}")
                 continue
 
@@ -256,7 +244,7 @@ class FactoryEngine(VideoProcessorBase):
         except queue.Empty:
             pass # Keep using old results until new ones arrive
 
-        # 3. Draw HUD (Instantly, using last known positions)
+        # 3. Draw HUD
         for name, color, (top, right, bottom, left), status in self.last_results:
             # Clean Brackets
             l = 30
