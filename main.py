@@ -9,6 +9,8 @@ import time
 import av
 import requests
 from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.orm import sessionmaker, declarative_base
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 
 # --- 1. SYSTEM CONFIGURATION ---
@@ -17,17 +19,33 @@ st.set_page_config(page_title="FactoryGuard AI", page_icon="🛡️", layout="wi
 # --- CONSTANTS & SETTINGS ---
 # --- CONSTANTS & SETTINGS ---
 FACES_DIR = 'known_faces'
-LOGS_DIR = 'logs'
-ATTENDANCE_FILE = os.path.join(LOGS_DIR, 'factory_logs.csv')
+# DB Setup
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    st.error("DATABASE_URL not found! Please set it in your environment variables.")
+    st.stop()
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class Attendance(Base):
+    __tablename__ = "attendance"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    time = Column(String)
+    date = Column(String)
+    type = Column(String)
+
+# Create Tables
+Base.metadata.create_all(bind=engine)
+
 REQUIRED_SAMPLES = 10   # Number of photos needed to register
 MIN_SHIFT_MINUTES = 60  # How long a shift lasts before they can check out (prevents mistakes)
 RESCAN_COOLDOWN = 2     # How many minutes to wait before scanning the same person again
 
 # --- DIRECTORY SETUP ---
 os.makedirs(FACES_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
-if not os.path.exists(ATTENDANCE_FILE):
-    pd.DataFrame(columns=['Name', 'Time', 'Date', 'Type']).to_csv(ATTENDANCE_FILE, index=False)
 
 # --- 2. CSS STYLING (Professional Light Theme) ---
 st.markdown("""
@@ -120,7 +138,7 @@ def delete_user(name):
 
 def smart_log_logic(name):
     """
-    Handles Attendance Logic:
+    Handles Attendance Logic (PostgreSQL Version):
     1. Check-In (Green)
     2. Cooldown (Ignore if scanned recently)
     3. Shift Lock (Prevent accidental checkout for 1 hr - Green)
@@ -129,17 +147,24 @@ def smart_log_logic(name):
     now = datetime.now()
     d_str, t_str = now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
     
+    session = SessionLocal()
     try:
-        df = pd.read_csv(ATTENDANCE_FILE)
-        logs = df[(df['Name'] == name) & (df['Date'] == d_str)]
+        # Get today's logs for this user
+        # Equivalent to: logs = df[(df['Name'] == name) & (df['Date'] == d_str)]
+        logs = session.query(Attendance).filter(
+            Attendance.name == name, 
+            Attendance.date == d_str
+        ).all()
         
         # 1. FIRST SCAN -> CHECK IN
-        if logs.empty:
-            pd.DataFrame([[name, t_str, d_str, "CHECK-IN"]], columns=df.columns).to_csv(ATTENDANCE_FILE, mode='a', header=False, index=False)
+        if not logs:
+            new_record = Attendance(name=name, time=t_str, date=d_str, type="CHECK-IN")
+            session.add(new_record)
+            session.commit()
             return "CHECKED IN", (0, 200, 0) # Green
 
-        last = logs.iloc[-1]
-        last_dt = datetime.strptime(f"{last['Date']} {last['Time']}", "%Y-%m-%d %H:%M:%S")
+        last = logs[-1]
+        last_dt = datetime.strptime(f"{last.date} {last.time}", "%Y-%m-%d %H:%M:%S")
         mins_passed = (now - last_dt).total_seconds() / 60
         
         # 2. ANTIBOUNCE (Ignore spam)
@@ -147,19 +172,25 @@ def smart_log_logic(name):
             return None, None # Don't update UI
 
         # 3. SAFETY LOCK (Keep Green if Shift is active)
-        if last['Type'] == "CHECK-IN" and mins_passed < MIN_SHIFT_MINUTES:
+        if last.type == "CHECK-IN" and mins_passed < MIN_SHIFT_MINUTES:
             mins_left = int(MIN_SHIFT_MINUTES - mins_passed)
             # You requested GREEN for shift status
             return f"ON SHIFT ({mins_left}m)", (0, 200, 0) # Green
 
         # 4. TOGGLE (Check Out)
-        new_type = "CHECK-OUT" if last['Type'] == "CHECK-IN" else "CHECK-IN"
+        new_type = "CHECK-OUT" if last.type == "CHECK-IN" else "CHECK-IN"
         color = (0, 0, 255) if new_type == "CHECK-OUT" else (0, 200, 0) # Red or Green
         
-        pd.DataFrame([[name, t_str, d_str, new_type]], columns=df.columns).to_csv(ATTENDANCE_FILE, mode='a', header=False, index=False)
+        new_record = Attendance(name=name, time=t_str, date=d_str, type=new_type)
+        session.add(new_record)
+        session.commit()
         return new_type, color
-    except:
+    except Exception as e:
+        session.rollback()
+        print(f"DB Error: {e}")
         return "ERROR", (100, 100, 100)
+    finally:
+        session.close()
 
 # --- 4. VIDEO PROCESSING ENGINE ---
 import threading
@@ -419,6 +450,10 @@ elif st.session_state.page == "Users":
 # --- PAGE 4: LOGS ---
 elif st.session_state.page == "Logs":
     st.markdown("<h2 style='text-align: center;'>Access Logs</h2>", unsafe_allow_html=True)
-    if os.path.exists(ATTENDANCE_FILE):
-        df = pd.read_csv(ATTENDANCE_FILE)
-        st.dataframe(df.sort_index(ascending=False), use_container_width=True)
+    
+    # Read from DB using Pandas SQL read
+    try:
+        df = pd.read_sql("SELECT * FROM attendance ORDER BY id DESC", engine)
+        st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error connecting to database: {e}")

@@ -7,3 +7,5 @@ pandas
 av
 watchdog
 requests
+sqlalchemy
+psycopg2-binary
